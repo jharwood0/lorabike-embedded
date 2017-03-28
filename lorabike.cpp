@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include "Sodaq_RN2483.h"
+#include <rn2xx3.h>
 #include <Sodaq_UBlox_GPS.h>
 
 #define DEBUG_SERIAL SerialUSB
@@ -16,29 +16,57 @@ volatile bool int2_flag = false;
 unsigned long wake_time;
 bool wake;
 
-uint8_t DevEUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-uint8_t AppEUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-uint8_t AppKey[16] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+String AppEUI = "70B3D57EF00041F8";
+String AppKey = "6F5A76EE295FB19C6E51095DD606498D";
+String hweui = "";
+bool join_result;
 
-void setupLoRaOTAA(){
-  if (LoRaBee.initOTA(LORA_SERIAL, DevEUI, AppEUI, AppKey, false))
-  {
-    DEBUG_SERIAL.println("Communication to LoRaBEE successful.");
+rn2xx3 LoRaWAN(LORA_SERIAL);
+
+void init_radio(){
+  delay(100);
+  DEBUG_SERIAL.println("flushing serial");
+  //LORA_SERIAL.flush();
+  DEBUG_SERIAL.println("Autobauding");
+  LoRaWAN.autobaud();
+
+  /* Wait for RN2483 to turn on */
+  DEBUG_SERIAL.println("Getting hweui");
+  while(hweui.length() != 16){
+    hweui = LoRaWAN.hweui();
+    DEBUG_SERIAL.println("Can't get HWEUI");
   }
-  else
-  {
-    DEBUG_SERIAL.println("OTAA Setup failed!");
+  DEBUG_SERIAL.println("Register device using: ");
+  DEBUG_SERIAL.println(hweui);
+  DEBUG_SERIAL.println("RN2xx3 firmware version:");
+  DEBUG_SERIAL.println(LoRaWAN.sysver());
+  join_result = LoRaWAN.initOTAA(AppEUI, AppKey);
+  if(join_result){
+    DEBUG_SERIAL.println("Connected to LoRaWAN successfully!");
+  }else{
+    DEBUG_SERIAL.println("Failed to connect to LoRaWAN");
   }
 }
 
-void setupGPS(){
+struct lora_pkt {
+  long epoch;
+  uint8_t bat;
+  int8_t temp;
+  int32_t lat;
+  int32_t lng;
+  int16_t altitude;
+  int16_t speed;
+  uint8_t course;
+  uint8_t sat;
+  uint8_t ttf;
+};
+
+void init_gps(){
   sodaq_gps.init(GPS_ENABLE);
   sodaq_gps.setDiag(DEBUG_SERIAL);
 }
 
-void setup(){
-  /* Enable GPS */
-  /* Accelerometer Interrupt */
+void init_accel(){
   Wire.begin();
   pinMode(ACCEL_INT1, INPUT_PULLUP);
   pinMode(ACCEL_INT2, INPUT_PULLUP);
@@ -64,6 +92,25 @@ void setup(){
 
   writeReg(0x22, 0b00100000); // INT1
   writeReg(0x23, 0b00100000); // INT2
+}
+
+
+void setup(){
+  while ((!SerialUSB) && (millis() < 10000)) {
+    // Wait for SerialUSB or start after 30 seconds
+  }
+  /* Open serial ports */
+  LORA_SERIAL.begin(9600);
+  DEBUG_SERIAL.begin(9600);
+
+  /* Accelerometer Interrupt */
+  init_accel();
+
+  /* LoRaWAN */
+  init_radio();
+
+  /* GPS */
+  init_gps();
 
   wake = false;
 }
@@ -82,6 +129,9 @@ void loop(){
     DEBUG_SERIAL.println(String(" lat = ") + String(sodaq_gps.getLat(), 7));
     DEBUG_SERIAL.println(String(" lon = ") + String(sodaq_gps.getLon(), 7));
     DEBUG_SERIAL.println(String(" num sats = ") + String(sodaq_gps.getNumberOfSatellites()));
+
+    lora_pkt data = { 0, 0, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
+    LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
 
     if(millis() - wake_time >= WAKE_DURATION){
       DEBUG_SERIAL.println("GOING TO SLEEP......");
