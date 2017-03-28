@@ -5,11 +5,16 @@
 
 #define DEBUG_SERIAL SerialUSB
 #define LORA_SERIAL Serial1
+
+#define WAKE_DURATION 5000 // 300000 //(5 minutes in millis)
+
 /* Accel Interrupts */
 #define ACCEL_ADR 0b0011110
 volatile bool int1_flag = false;
 volatile bool int2_flag = false;
 
+unsigned long wake_time;
+bool wake;
 
 uint8_t DevEUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t AppEUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -59,14 +64,33 @@ void setup(){
 
   writeReg(0x22, 0b00100000); // INT1
   writeReg(0x23, 0b00100000); // INT2
+
+  wake = false;
 }
 
 void loop(){
   if (int1_flag || int2_flag) {
+    wake_time = millis();
+    wake = true;
     int2_flag = false;
     int1_flag = false;
     DEBUG_SERIAL.println("Interrupt!");
   }
+  if(wake){
+    DEBUG_SERIAL.println("I AM AWAKE");
+
+    DEBUG_SERIAL.println(String(" lat = ") + String(sodaq_gps.getLat(), 7));
+    DEBUG_SERIAL.println(String(" lon = ") + String(sodaq_gps.getLon(), 7));
+    DEBUG_SERIAL.println(String(" num sats = ") + String(sodaq_gps.getNumberOfSatellites()));
+
+    if(millis() - wake_time >= WAKE_DURATION){
+      DEBUG_SERIAL.println("GOING TO SLEEP......");
+      wake = false;
+    }
+  }else{
+    DEBUG_SERIAL.println("I AM ASLEEP");
+  }
+
 
     int16_t x_val = (readReg(0x29) << 8) | readReg(0x28);
     int16_t y_val = (readReg(0x2B) << 8) | readReg(0x2A);
@@ -74,9 +98,6 @@ void loop(){
 
     DEBUG_SERIAL.println(String("Accelerometer Readings: ") + x_val + ", " + y_val + ", " + z_val);
 
-    DEBUG_SERIAL.println(String(" lat = ") + String(sodaq_gps.getLat(), 7));
-    DEBUG_SERIAL.println(String(" lon = ") + String(sodaq_gps.getLon(), 7));
-    DEBUG_SERIAL.println(String(" num sats = ") + String(sodaq_gps.getNumberOfSatellites()));
 
 
   for (int i=0; i<1000; i++) {
