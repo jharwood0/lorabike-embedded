@@ -23,6 +23,39 @@ bool join_result;
 
 rn2xx3 LoRaWAN(LORA_SERIAL);
 
+
+uint8_t readReg(uint8_t reg)
+{
+  Wire.beginTransmission(ACCEL_ADR);
+  Wire.write(reg);
+  Wire.endTransmission();
+  Wire.requestFrom(ACCEL_ADR, 0x01);
+
+  uint8_t val = Wire.read();
+  Wire.endTransmission();
+
+  return val;
+}
+
+uint8_t writeReg(uint8_t reg, uint8_t val)
+{
+  Wire.beginTransmission(ACCEL_ADR);
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
+  delayMicroseconds(10000);
+}
+
+void ISR1()
+{
+  int1_flag = true;
+}
+
+void ISR2()
+{
+  int2_flag = true;
+}
+
 void init_radio(){
   delay(100);
   LORA_SERIAL.flush();
@@ -151,37 +184,4 @@ void loop(){
   for (int i=0; i<1000; i++) {
     delayMicroseconds(1000);
   }
-}
-
-
-uint8_t readReg(uint8_t reg)
-{
-  Wire.beginTransmission(ACCEL_ADR);
-  Wire.write(reg);
-  Wire.endTransmission();
-  Wire.requestFrom(ACCEL_ADR, 0x01);
-
-  uint8_t val = Wire.read();
-  Wire.endTransmission();
-
-  return val;
-}
-
-uint8_t writeReg(uint8_t reg, uint8_t val)
-{
-  Wire.beginTransmission(ACCEL_ADR);
-  Wire.write(reg);
-  Wire.write(val);
-  Wire.endTransmission();
-  delayMicroseconds(10000);
-}
-
-void ISR1()
-{
-  int1_flag = true;
-}
-
-void ISR2()
-{
-  int2_flag = true;
 }
