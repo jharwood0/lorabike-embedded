@@ -6,7 +6,7 @@
 #define DEBUG_SERIAL SerialUSB
 #define LORA_SERIAL Serial1
 
-#define WAKE_DURATION 5000 // 300000 //(5 minutes in millis)
+#define WAKE_DURATION 300000 //(5 minutes in millis)
 
 /* Accel Interrupts */
 #define ACCEL_ADR 0b0011110
@@ -25,9 +25,7 @@ rn2xx3 LoRaWAN(LORA_SERIAL);
 
 void init_radio(){
   delay(100);
-  DEBUG_SERIAL.println("flushing serial");
-  //LORA_SERIAL.flush();
-  DEBUG_SERIAL.println("Autobauding");
+  LORA_SERIAL.flush();
   LoRaWAN.autobaud();
 
   /* Wait for RN2483 to turn on */
@@ -130,7 +128,7 @@ void loop(){
     DEBUG_SERIAL.println(String(" lon = ") + String(sodaq_gps.getLon(), 7));
     DEBUG_SERIAL.println(String(" num sats = ") + String(sodaq_gps.getNumberOfSatellites()));
 
-    lora_pkt data = { 0, 0, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
+    lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
     LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
 
     if(millis() - wake_time >= WAKE_DURATION){
