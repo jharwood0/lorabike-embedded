@@ -8,13 +8,9 @@
 
 #define WAKE_DURATION 300000 //(5 minutes in millis)
 
-/* Accel Interrupts */
-#define ACCEL_ADR 0b0011110
-volatile bool int1_flag = false;
-volatile bool int2_flag = false;
+#define ACCEL_ADR 0x1E
 
 unsigned long wake_time;
-bool wake;
 
 String AppEUI = "70B3D57EF00041F8";
 String AppKey = "6F5A76EE295FB19C6E51095DD606498D";
@@ -24,8 +20,7 @@ bool join_result;
 rn2xx3 LoRaWAN(LORA_SERIAL);
 
 
-uint8_t readReg(uint8_t reg)
-{
+uint8_t readReg(uint8_t reg) {
   Wire.beginTransmission(ACCEL_ADR);
   Wire.write(reg);
   Wire.endTransmission();
@@ -37,8 +32,7 @@ uint8_t readReg(uint8_t reg)
   return val;
 }
 
-uint8_t writeReg(uint8_t reg, uint8_t val)
-{
+void writeReg(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(ACCEL_ADR);
   Wire.write(reg);
   Wire.write(val);
@@ -46,39 +40,46 @@ uint8_t writeReg(uint8_t reg, uint8_t val)
   delayMicroseconds(10000);
 }
 
-void ISR1()
-{
-  int1_flag = true;
+void ISR1() {
+  wake_time = millis();
 }
 
-void ISR2()
-{
-  int2_flag = true;
+/* Attempts to connect to LoRaWAN gateway */
+void lora_connect() {
+  DEBUG_SERIAL.println("[LoRaWAN] Initialising OTAA");
+  join_result = LoRaWAN.initOTAA(AppEUI, AppKey);
+  if (join_result) {
+    DEBUG_SERIAL.println("[LoRaWAN] Connected to LoRaWAN successfully!");
+  } else {
+    DEBUG_SERIAL.println("[LoRaWAN] Failed to connect to LoRaWAN");
+  }
 }
 
-void init_radio(){
+/* Initialises onboard GPS */
+void init_gps() {
+  DEBUG_SERIAL.println("[GPS] initialising");
+  sodaq_gps.init(GPS_ENABLE);
+  sodaq_gps.setDiag(DEBUG_SERIAL);
+}
+
+
+/* Initialises RN2483 */
+void init_radio() {
   delay(100);
-  LORA_SERIAL.flush();
+  DEBUG_SERIAL.println("[LoRaWAN] autobauding...");
   LoRaWAN.autobaud();
 
   /* Wait for RN2483 to turn on */
-  DEBUG_SERIAL.println("Getting hweui");
-  while(hweui.length() != 16){
+  DEBUG_SERIAL.println("[LoRaWAN] getting hweui");
+  while (hweui.length() != 16) {
     hweui = LoRaWAN.hweui();
-    DEBUG_SERIAL.println("Can't get HWEUI");
   }
-  DEBUG_SERIAL.println("Register device using: ");
-  DEBUG_SERIAL.println(hweui);
-  DEBUG_SERIAL.println("RN2xx3 firmware version:");
-  DEBUG_SERIAL.println(LoRaWAN.sysver());
-  join_result = LoRaWAN.initOTAA(AppEUI, AppKey);
-  if(join_result){
-    DEBUG_SERIAL.println("Connected to LoRaWAN successfully!");
-  }else{
-    DEBUG_SERIAL.println("Failed to connect to LoRaWAN");
-  }
+  DEBUG_SERIAL.println("[LoRaWAN] devEUI = " + hweui);
+  DEBUG_SERIAL.println("[LoRaWAN] " + LoRaWAN.sysver());
+  lora_connect();
 }
 
+/* Struct for lorawan packet */
 struct lora_pkt {
   long epoch;
   uint8_t bat;
@@ -92,17 +93,17 @@ struct lora_pkt {
   uint8_t ttf;
 };
 
-void init_gps(){
-  sodaq_gps.init(GPS_ENABLE);
-  sodaq_gps.setDiag(DEBUG_SERIAL);
-}
-
+/* Initialises accel */
 void init_accel(){
   Wire.begin();
+
+  SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk; /* Set sleep mode */
+
   pinMode(ACCEL_INT1, INPUT_PULLUP);
-  pinMode(ACCEL_INT2, INPUT_PULLUP);
   attachInterrupt(ACCEL_INT1, ISR1, FALLING);
-  attachInterrupt(ACCEL_INT2, ISR2, FALLING);
+  SYSCTRL->XOSC32K.bit.RUNSTDBY = 1;  /* tell XOSC32K to run on standby */
+  // Configure EIC to use GCLK1 which uses XOSC32K
+  GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(GCM_EIC) | GCLK_CLKCTRL_GEN_GCLK1 | GCLK_CLKCTRL_CLKEN;
 
   writeReg(0x1F, 0b10000000); /* Reboot */
   writeReg(0x20, 0b01010111); /* Set to 50z all axes active */
@@ -125,63 +126,60 @@ void init_accel(){
   writeReg(0x23, 0b00100000); // INT2
 }
 
-
 void setup(){
   while ((!SerialUSB) && (millis() < 10000)) {
     // Wait for SerialUSB or start after 30 seconds
   }
-  /* Open serial ports */
+
   LORA_SERIAL.begin(9600);
   DEBUG_SERIAL.begin(9600);
+  DEBUG_SERIAL.println("[SYS] Hello World!");
 
   /* Accelerometer Interrupt */
+  init_gps();
   init_accel();
-
-  /* LoRaWAN */
   init_radio();
 
-  /* GPS */
-  init_gps();
-
-  wake = false;
+  delay(10000);
+  DEBUG_SERIAL.println("[SYS] Going to sleep mode");
 }
 
-void loop(){
-  if (int1_flag || int2_flag) {
-    wake_time = millis();
-    wake = true;
-    int2_flag = false;
-    int1_flag = false;
-    DEBUG_SERIAL.println("Interrupt!");
+void loop() {
+  //Disable USB
+  USB->DEVICE.CTRLA.reg &= ~USB_CTRLA_ENABLE;
+  __WFI();              //Enter sleep mode
+  //Enable USB
+  USB->DEVICE.CTRLA.reg |= USB_CTRLA_ENABLE;
+
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(LED_GREEN, LOW);
+    delayMicroseconds(200000);
+    digitalWrite(LED_GREEN, HIGH);
+    delayMicroseconds(200000);
   }
-  if(wake){
-    DEBUG_SERIAL.println("I AM AWAKE");
 
-    DEBUG_SERIAL.println(String(" lat = ") + String(sodaq_gps.getLat(), 7));
-    DEBUG_SERIAL.println(String(" lon = ") + String(sodaq_gps.getLon(), 7));
-    DEBUG_SERIAL.println(String(" num sats = ") + String(sodaq_gps.getNumberOfSatellites()));
-
-    lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
-    LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
-
-    if(millis() - wake_time >= WAKE_DURATION){
-      DEBUG_SERIAL.println("GOING TO SLEEP......");
-      wake = false;
+  /* Stay awake for 5 mins and send data */
+  while(millis() - wake_time < WAKE_DURATION){
+    sodaq_gps.scan();
+    if(join_result){
+      lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
+      LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
+      for (int i = 0; i < 10; i++) {
+        digitalWrite(LED_BLUE, LOW);
+        delayMicroseconds(200000);
+        digitalWrite(LED_BLUE, HIGH);
+        delayMicroseconds(200000);
+      }
+    }else{
+      lora_connect();
     }
-  }else{
-    DEBUG_SERIAL.println("I AM ASLEEP");
+    delay(5000);
+  }
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(LED_RED, LOW);
+    delayMicroseconds(200000);
+    digitalWrite(LED_RED, HIGH);
+    delayMicroseconds(200000);
   }
 
-
-    int16_t x_val = (readReg(0x29) << 8) | readReg(0x28);
-    int16_t y_val = (readReg(0x2B) << 8) | readReg(0x2A);
-    int16_t z_val = (readReg(0x2D) << 8) | readReg(0x2C);
-
-    DEBUG_SERIAL.println(String("Accelerometer Readings: ") + x_val + ", " + y_val + ", " + z_val);
-
-
-
-  for (int i=0; i<1000; i++) {
-    delayMicroseconds(1000);
-  }
 }
