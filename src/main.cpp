@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <rn2xx3.h>
+#include <Sodaq_UBlox_GPS.h>
 
 #define DEBUG_SERIAL SerialUSB
 #define LORA_SERIAL Serial1
@@ -53,6 +54,14 @@ void lora_connect() {
     DEBUG_SERIAL.println("[LoRaWAN] Failed to connect to LoRaWAN");
   }
 }
+
+/* Initialises onboard GPS */
+void init_gps() {
+  DEBUG_SERIAL.println("[GPS] initialising");
+  sodaq_gps.init(GPS_ENABLE);
+  sodaq_gps.setDiag(DEBUG_SERIAL);
+}
+
 
 /* Initialises RN2483 */
 void init_radio() {
@@ -127,6 +136,7 @@ void setup(){
   DEBUG_SERIAL.println("[SYS] Hello World!");
 
   /* Accelerometer Interrupt */
+  init_gps();
   init_accel();
   init_radio();
 
@@ -147,10 +157,12 @@ void loop() {
     digitalWrite(LED_GREEN, HIGH);
     delayMicroseconds(200000);
   }
+
   /* Stay awake for 5 mins and send data */
   while(millis() - wake_time < WAKE_DURATION){
+    sodaq_gps.scan();
     if(join_result){
-      lora_pkt data = { 0, 12, 0, 0, 0, 0, 0, 0, 4 ,0};
+      lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
       LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
       for (int i = 0; i < 10; i++) {
         digitalWrite(LED_BLUE, LOW);
@@ -158,7 +170,6 @@ void loop() {
         digitalWrite(LED_BLUE, HIGH);
         delayMicroseconds(200000);
       }
-      //lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
     }else{
       lora_connect();
     }
