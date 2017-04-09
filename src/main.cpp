@@ -1,23 +1,25 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <rn2xx3.h>
 
-#define CONSOLE_SERIAL SerialUSB
+#define DEBUG_SERIAL SerialUSB
+#define LORA_SERIAL Serial1
 
-#define ACCEL_ADR 0b0011110
+#define WAKE_DURATION 300000 //(5 minutes in millis)
+
+#define ACCEL_ADR 0x1E
+
+unsigned long wake_time;
+
+String AppEUI = "70B3D57EF00041F8";
+String AppKey = "6F5A76EE295FB19C6E51095DD606498D";
+String hweui = "";
+bool join_result;
+
+rn2xx3 LoRaWAN(LORA_SERIAL);
 
 
-volatile bool int1_flag = false;
-
-
-void ISR1()
-{
-  int1_flag = true;
-}
-
-int16_t _baseX, _baseY, _baseZ;
-
-uint8_t readReg(uint8_t reg)
-{
+uint8_t readReg(uint8_t reg) {
   Wire.beginTransmission(ACCEL_ADR);
   Wire.write(reg);
   Wire.endTransmission();
@@ -29,8 +31,7 @@ uint8_t readReg(uint8_t reg)
   return val;
 }
 
-uint8_t writeReg(uint8_t reg, uint8_t val)
-{
+void writeReg(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(ACCEL_ADR);
   Wire.write(reg);
   Wire.write(val);
@@ -38,81 +39,136 @@ uint8_t writeReg(uint8_t reg, uint8_t val)
   delayMicroseconds(10000);
 }
 
-void readMagneto(int16_t &x, int16_t &y, int16_t &z)
-{
-	x = (readReg(0x09) << 8) | readReg(0x08);
-	y = (readReg(0x0B) << 8) | readReg(0x0A);
-	z = (readReg(0x0D) << 8) | readReg(0x0C);
+void ISR1() {
+  wake_time = millis();
 }
 
-
-void calibrate()
-{
-	int16_t x_val, y_val, z_val;
-	float x, y, z = 0;
-	for (int i = 1; i <= 50; i++)
-	{
-		readMagneto(x_val, y_val, z_val);
-		SerialUSB.print("x: "); SerialUSB.print(x_val); SerialUSB.print("y: "); SerialUSB.print(y_val);  SerialUSB.print("z: "); SerialUSB.println(z_val);
-		x = x - (x / i) + ((float)x_val / i);
-		y = y - (y / i) + ((float)y_val / i);
-		z = z - (z / i) + ((float)z_val / i);
-		SerialUSB.print("avg x: "); SerialUSB.print(x); SerialUSB.print("avg y: "); SerialUSB.print(y);  SerialUSB.print("avg z: "); SerialUSB.println(z);
-		delay(100);
-	}
-	_baseX = (int16_t)x;
-	_baseY = (int16_t)y;
-	_baseZ = (int16_t)z;
+/* Attempts to connect to LoRaWAN gateway */
+void lora_connect() {
+  DEBUG_SERIAL.println("[LoRaWAN] Initialising OTAA");
+  join_result = LoRaWAN.initOTAA(AppEUI, AppKey);
+  if (join_result) {
+    DEBUG_SERIAL.println("[LoRaWAN] Connected to LoRaWAN successfully!");
+  } else {
+    DEBUG_SERIAL.println("[LoRaWAN] Failed to connect to LoRaWAN");
+  }
 }
 
+/* Initialises RN2483 */
+void init_radio() {
+  delay(100);
+  DEBUG_SERIAL.println("[LoRaWAN] autobauding...");
+  LoRaWAN.autobaud();
 
-void setup()
-{
-	CONSOLE_SERIAL.begin(9600);
-	while(!CONSOLE_SERIAL){}
-	CONSOLE_SERIAL.println("Testing Magnetometer");
-
-	Wire.begin();
-
-	pinMode(ACCEL_INT1, INPUT_PULLUP);
-	pinMode(ACCEL_INT2, INPUT_PULLUP);
-	attachInterrupt(ACCEL_INT1, ISR1, FALLING);
-	attachInterrupt(ACCEL_INT2, ISR1, FALLING);
-
-
-	writeReg(0x1F, 0b10000000);  //reboot
-	writeReg(0x24, 0b11110000);
-	writeReg(0x25, 0b01100000);
-	writeReg(0x26, 0b00000000);
-	calibrate();
-	writeReg(0x12, 0b11100001); // Axes mask
-	uint16_t threshold = (max(max(_baseX, _baseY), _baseZ) + 50) & ~(1 << 15);
-	writeReg(0x14, (byte) threshold & 0x00FF);
-	writeReg(0x15, (byte)(threshold >> 8));
-	writeReg(0x22, 0b00001000);
-	writeReg(0x23, 0b00000000);
+  /* Wait for RN2483 to turn on */
+  DEBUG_SERIAL.println("[LoRaWAN] getting hweui");
+  while (hweui.length() != 16) {
+    hweui = LoRaWAN.hweui();
+  }
+  DEBUG_SERIAL.println("[LoRaWAN] devEUI = " + hweui);
+  DEBUG_SERIAL.println("[LoRaWAN] " + LoRaWAN.sysver());
+  lora_connect();
 }
 
+/* Struct for lorawan packet */
+struct lora_pkt {
+  long epoch;
+  uint8_t bat;
+  int8_t temp;
+  int32_t lat;
+  int32_t lng;
+  int16_t altitude;
+  int16_t speed;
+  uint8_t course;
+  uint8_t sat;
+  uint8_t ttf;
+};
 
-void loop()
-{
-	if (int1_flag) {
-		int1_flag = false;
-		CONSOLE_SERIAL.println("INT1 Interrupt");
-	}
+/* Initialises accel */
+void init_accel(){
+  Wire.begin();
 
-	int16_t x_val, y_val, z_val;
-	readMagneto(x_val, y_val, z_val);
-	CONSOLE_SERIAL.println(String("Magnetometer Readings: ") + x_val + ", " + y_val + ", " + z_val);
-	CONSOLE_SERIAL.print("Reading from register: 0x" + String(0x13, HEX));
-	CONSOLE_SERIAL.print(", response: ");
-	CONSOLE_SERIAL.println(readReg(0x13), BIN);
-	USB->DEVICE.CTRLA.reg &= ~USB_CTRLA_ENABLE;
-	__WFI();							//Enter sleep mode
-	USB->DEVICE.CTRLA.reg |= USB_CTRLA_ENABLE;
+  SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk; /* Set sleep mode */
 
-	digitalWrite(LED_RED, LOW);
-	delay(3000);
-	digitalWrite(LED_RED, HIGH);
-	delay(1000);
+  pinMode(ACCEL_INT1, INPUT_PULLUP);
+  attachInterrupt(ACCEL_INT1, ISR1, FALLING);
+  SYSCTRL->XOSC32K.bit.RUNSTDBY = 1;  /* tell XOSC32K to run on standby */
+  // Configure EIC to use GCLK1 which uses XOSC32K
+  GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(GCM_EIC) | GCLK_CLKCTRL_GEN_GCLK1 | GCLK_CLKCTRL_CLKEN;
+
+  writeReg(0x1F, 0b10000000); /* Reboot */
+  writeReg(0x20, 0b01010111); /* Set to 50z all axes active */
+
+  // Interrupt source 1
+  // Set to be Y sensitive
+  // IG_SRC1
+  writeReg(0x30, 0b10001000); // Axes mask
+  writeReg(0x32, 0b00111111); // Threshold
+  writeReg(0x33, 0b00000000); // Duration
+
+  // Interrupt source 2
+  // Set to be X sensitive
+  // IG_SRC2
+  writeReg(0x34, 0b10000010); // Axes mask
+  writeReg(0x36, 0b00111111); // Threshold
+  writeReg(0x37, 0b00000000); // Duration
+
+  writeReg(0x22, 0b00100000); // INT1
+  writeReg(0x23, 0b00100000); // INT2
+}
+
+void setup(){
+  while ((!SerialUSB) && (millis() < 10000)) {
+    // Wait for SerialUSB or start after 30 seconds
+  }
+
+  LORA_SERIAL.begin(9600);
+  DEBUG_SERIAL.begin(9600);
+  DEBUG_SERIAL.println("[SYS] Hello World!");
+
+  /* Accelerometer Interrupt */
+  init_accel();
+  init_radio();
+
+  delay(10000);
+  DEBUG_SERIAL.println("[SYS] Going to sleep mode");
+}
+
+void loop() {
+  //Disable USB
+  USB->DEVICE.CTRLA.reg &= ~USB_CTRLA_ENABLE;
+  __WFI();              //Enter sleep mode
+  //Enable USB
+  USB->DEVICE.CTRLA.reg |= USB_CTRLA_ENABLE;
+
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(LED_GREEN, LOW);
+    delayMicroseconds(200000);
+    digitalWrite(LED_GREEN, HIGH);
+    delayMicroseconds(200000);
+  }
+  /* Stay awake for 5 mins and send data */
+  while(millis() - wake_time < WAKE_DURATION){
+    if(join_result){
+      lora_pkt data = { 0, 12, 0, 0, 0, 0, 0, 0, 4 ,0};
+      LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
+      for (int i = 0; i < 10; i++) {
+        digitalWrite(LED_BLUE, LOW);
+        delayMicroseconds(200000);
+        digitalWrite(LED_BLUE, HIGH);
+        delayMicroseconds(200000);
+      }
+      //lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
+    }else{
+      lora_connect();
+    }
+    delay(5000);
+  }
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(LED_RED, LOW);
+    delayMicroseconds(200000);
+    digitalWrite(LED_RED, HIGH);
+    delayMicroseconds(200000);
+  }
+
 }
