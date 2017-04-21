@@ -46,20 +46,13 @@ void ISR1() {
 
 /* Attempts to connect to LoRaWAN gateway */
 void lora_connect() {
-  DEBUG_SERIAL.println("[LoRaWAN] Initialising OTAA");
   join_result = LoRaWAN.initOTAA(AppEUI, AppKey);
-  if (join_result) {
-    DEBUG_SERIAL.println("[LoRaWAN] Connected to LoRaWAN successfully!");
-  } else {
-    DEBUG_SERIAL.println("[LoRaWAN] Failed to connect to LoRaWAN");
-  }
 }
 
 /* Initialises onboard GPS */
 void init_gps() {
   DEBUG_SERIAL.println("[GPS] initialising");
   sodaq_gps.init(GPS_ENABLE);
-  sodaq_gps.setDiag(DEBUG_SERIAL);
 }
 
 
@@ -151,15 +144,14 @@ void loop() {
   //Enable USB
   USB->DEVICE.CTRLA.reg |= USB_CTRLA_ENABLE;
 
-  for (int i = 0; i < 10; i++) {
-    digitalWrite(LED_GREEN, LOW);
-    delayMicroseconds(200000);
-    digitalWrite(LED_GREEN, HIGH);
-    delayMicroseconds(200000);
-  }
-
   /* Stay awake for 5 mins and send data */
   while(millis() - wake_time < WAKE_DURATION){
+    for (int i = 0; i < 10; i++) {
+      digitalWrite(LED_GREEN, LOW);
+      delayMicroseconds(200000);
+      digitalWrite(LED_GREEN, HIGH);
+      delayMicroseconds(200000);
+    }
     sodaq_gps.scan();
     if(join_result){
       lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
