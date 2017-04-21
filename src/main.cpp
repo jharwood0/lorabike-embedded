@@ -74,16 +74,10 @@ void init_radio() {
 
 /* Struct for lorawan packet */
 struct lora_pkt {
-  long epoch;
-  uint8_t bat;
-  int8_t temp;
   int32_t lat;
   int32_t lng;
   int16_t altitude;
-  int16_t speed;
-  uint8_t course;
   uint8_t sat;
-  uint8_t ttf;
 };
 
 /* Initialises accel */
@@ -152,9 +146,10 @@ void loop() {
       digitalWrite(LED_GREEN, HIGH);
       delayMicroseconds(200000);
     }
-    sodaq_gps.scan();
+    uint32_t gps_timeout = 60L * 1000;
+    sodaq_gps.scan(true, gps_timeout);
     if(join_result){
-      lora_pkt data = { 0, 12, 0, sodaq_gps.getLat(), sodaq_gps.getLon(), 0, 0, 0, sodaq_gps.getNumberOfSatellites() ,0};
+      lora_pkt data = {(sodaq_gps.getLat() * 10000000), (sodaq_gps.getLon() * 10000000), sodaq_gps.getAlt(), sodaq_gps.getNumberOfSatellites()};
       LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
       for (int i = 0; i < 10; i++) {
         digitalWrite(LED_BLUE, LOW);
