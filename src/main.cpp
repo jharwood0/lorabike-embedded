@@ -84,10 +84,11 @@ void loop(){
     if(DEBUG) Serial.print("[GPS] Reading UART...\n");
     if(DEBUG) delay(1000); /* Wait for Serial to clear for debug */
     String out = "";
-    
+
     //data is sent from gps once a second, we'll gather data for 2 seconds to make sure
     unsigned long currentMillis = millis();
-    while(millis() - currentMillis < 2000){
+    while(millis() - currentMillis < 3000){
+      while(!Serial1.available()){}
       while (Serial1.available()){
         uint8_t c = Serial1.read();
         out += char(c);
