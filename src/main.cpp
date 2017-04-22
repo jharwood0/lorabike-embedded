@@ -17,6 +17,9 @@ String APPKEY = "6F5A76EE295FB19C6E51095DD606498D";
 
 const int debug_baud = 9600;
 const int gps_baud = 9600;
+const int rn2483_baud = 9600;
+
+uint8_t tx_result;
 
 bool LoRaWAN_connection = false;
 
@@ -40,29 +43,47 @@ struct lora_pkt {
   uint8_t sat;
 };
 
+void read_GPS(){
+  //data is sent from gps once a second, we'll gather data for 2 seconds to make sure
+  unsigned long currentMillis = millis();
+  while(millis() - currentMillis < 3000){
+    while (Serial1.available()){
+      gps.encode(Serial1.read());
+    }
+  }
+}
 
 void initialise_LoRaWAN(){
-  if(DEBUG) Serial.print("[LoRaWAN] Initialising UART...");
-  Serial2.begin(9600); //serial port to radio
+  #ifdef DEBUG
+    Serial.print("[LoRaWAN] Initialising UART...");
+  #endif
+  Serial2.begin(rn2483_baud); //serial port to radio
   Serial2.flush();
   LoRaWAN.autobaud();
-  if(DEBUG) Serial.print("Done\n");
-  /* Join LoRaWAN */
-  if(DEBUG) Serial.print("[LoRaWAN] Connecting...");
+  #ifdef DEBUG
+    Serial.print("Done\n");
+    Serial.print("[LoRaWAN] Connecting...");
+  #endif
   LoRaWAN_connection = LoRaWAN.initOTAA(APPEUI, APPKEY);
-  if(DEBUG){
+  #ifdef DEBUG
     if(LoRaWAN_connection){
       Serial.print("Success!\n");
     }else{
       Serial.print("Failed\n");
     }
-  }
+  #endif
 }
 
 void initialise_GPS(){
-  if(DEBUG) Serial.print("[GPS] Initialising UART...");
+  #ifdef DEBUG
+    Serial.print("[GPS] Initialising UART...");
+  #endif
+
   Serial1.begin(gps_baud);
-  if(DEBUG) Serial.print("Done\n");
+
+  #ifdef DEBUG
+    Serial.print("Done\n");
+  #endif
 }
 
 void setup(){
@@ -70,7 +91,9 @@ void setup(){
   delay(5000);
 
   /* Initialise uart communication to Debug */
-  if(DEBUG) Serial.begin(debug_baud);
+  #ifdef DEBUG
+    Serial.begin(debug_baud);
+  #endif
 
   /* Initialise uart communication to GPS module */
   if(ENABLE_GPS) initialise_GPS();
@@ -81,60 +104,70 @@ void setup(){
 
 void loop(){
   if(ENABLE_GPS){
-    if(DEBUG) Serial.print("[GPS] Reading UART...\n");
-    if(DEBUG) delay(1000); /* Wait for Serial to clear for debug */
-    String out = "";
+    #ifdef DEBUG
+      Serial.print("[GPS] Reading UART...\n");
+      delay(1000); /* Wait for Serial to clear for debug */
+    #endif
 
-    //data is sent from gps once a second, we'll gather data for 2 seconds to make sure
-    unsigned long currentMillis = millis();
-    while(millis() - currentMillis < 3000){
-      while(!Serial1.available()){}
-      while (Serial1.available()){
-        uint8_t c = Serial1.read();
-        out += char(c);
-        if (gps.encode(c))
-        {
-          new_gps_data = true;
-        }
-      }
-    }
-    if(DEBUG) Serial.println("\n------\n"+out+"\n--------\n");
-    if(DEBUG) delay(1000); /* Wait for Serial to clear for debug */
-    //if(new_gps_data){
-      //if(DEBUG) Serial.print("[GPS] New data\n");
-      gps.f_get_position(&flat, &flon, &age);
-      satellites = gps.satellites();
-      falt = gps.f_altitude();
-      gps.stats(&chars, &sentences, &fchecksum);
+    read_GPS();
 
-      if(DEBUG){
-        Serial.print("LAT: ");
-        Serial.print(flat);
-        Serial.print("| LON: ");
-        Serial.print(flon);
-        Serial.print("| AGE: ");
-        Serial.print(age);
-        Serial.print("| SAT: ");
-        Serial.print(satellites);
-        Serial.print("| ALT: ");
-        Serial.println(falt);
-        Serial.print("CHARS: ");
-        Serial.print(chars);
-        Serial.print(" SENTENCES: ");
-        Serial.print(sentences);
-        Serial.print(" FAILED: ");
-        Serial.print(fchecksum);
-      }
-    //}
+    gps.f_get_position(&flat, &flon, &age);
+    gps.stats(&chars, &sentences, &fchecksum);
+    satellites = gps.satellites();
+    falt = gps.f_altitude();
+
+    #ifdef DEBUG
+      Serial.print("LAT: ");
+      Serial.print(flat);
+      Serial.print("| LON: ");
+      Serial.print(flon);
+      Serial.print("| AGE: ");
+      Serial.print(age);
+      Serial.print("| SAT: ");
+      Serial.print(satellites);
+      Serial.print("| ALT: ");
+      Serial.println(falt);
+      Serial.print("CHARS: ");
+      Serial.print(chars);
+      Serial.print(" SENTENCES: ");
+      Serial.print(sentences);
+      Serial.print(" FAILED: ");
+      Serial.print(fchecksum);
+    #endif
+
   }
   if(ENABLE_LORAWAN){
     if(!LoRaWAN_connection){
       initialise_LoRaWAN();
     }else{
+      #ifdef DEBUG
+        Serial.print("[LoRaWAN] Constructing packet...");
+      #endif
+
       lora_pkt data = {(flat * 10000000), (flon * 10000000), falt, satellites};
-      LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
+
+      #ifdef DEBUG
+        Serial.print("Done\n");
+        Serial.print("[LoRaWAN] Transmitting packet...");
+      #endif
+
+      tx_result = LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
+
+      #ifdef DEBUG
+        switch(tx_result){
+          case 0:
+            Serial.print("Failed");
+            break;
+          case 1:
+            Serial.print("Success");
+            break;
+          case 2:
+            Serial.print("Downlink");
+            break;
+        }
+      #endif
     }
-    if(DEBUG) Serial.println(LoRaWAN.deveui());
   }
-  delay(2000);
+
+  delay(5000); // TODO: Replace this with sleep
 }
