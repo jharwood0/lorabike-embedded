@@ -11,7 +11,7 @@ UART3 -> Serial2 -> LoRaWAN
 String APPEUI = "70B3D57EF00041F8";
 String APPKEY = "6F5A76EE295FB19C6E51095DD606498D";
 
-#define DEBUG 1
+#define DEBUG
 #define ENABLE_GPS 1
 #define ENABLE_LORAWAN 1
 
@@ -44,13 +44,19 @@ struct lora_pkt {
 };
 
 void read_GPS(){
-  //data is sent from gps once a second, we'll gather data for 2 seconds to make sure
+  //data is sent from gps once a second, we'll gather data for 3 seconds to make sure
   unsigned long currentMillis = millis();
+  #ifdef DEBUG
+    Serial.print("[GPS] Reading UART...");
+  #endif
   while(millis() - currentMillis < 3000){
     while (Serial1.available()){
       gps.encode(Serial1.read());
     }
   }
+  #ifdef DEBUG
+    Serial.print("Done\n");
+  #endif
 }
 
 void initialise_LoRaWAN(){
@@ -104,13 +110,10 @@ void setup(){
 
 void loop(){
   if(ENABLE_GPS){
-    #ifdef DEBUG
-      Serial.print("[GPS] Reading UART...\n");
-      delay(1000); /* Wait for Serial to clear for debug */
-    #endif
 
-    read_GPS();
+    read_GPS(); // Reads uart for 3 seconds and feeds to tinygps
 
+    /* grab new gps values */
     gps.f_get_position(&flat, &flon, &age);
     gps.stats(&chars, &sentences, &fchecksum);
     satellites = gps.satellites();
@@ -154,6 +157,7 @@ void loop(){
       tx_result = LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
 
       #ifdef DEBUG
+        Serial.print("Done\n");
         switch(tx_result){
           case 0:
             Serial.print("Failed");
@@ -169,5 +173,5 @@ void loop(){
     }
   }
 
-  delay(5000); // TODO: Replace this with sleep
+  delay(5000); // TODO: Replace this with sleep with MPU6050 wake
 }
