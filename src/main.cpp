@@ -11,8 +11,8 @@ UART3 -> Serial2 -> LoRaWAN
 String APPEUI = "70B3D57EF00041F8";
 String APPKEY = "6F5A76EE295FB19C6E51095DD606498D";
 
-#define DEBUG 1
-#define ENABLE_GPS 0
+#define DEBUG 0
+#define ENABLE_GPS 1
 #define ENABLE_LORAWAN 1
 
 const int debug_baud = 9600;
@@ -20,8 +20,9 @@ const int gps_baud = 9600;
 
 bool LoRaWAN_connection = false;
 
-float flat, flon;
-unsigned long age;
+float flat = 0;
+float flon = 0;
+unsigned long age = 0;
 bool new_gps_data = false;
 
 TinyGPS gps;
@@ -88,7 +89,7 @@ void loop(){
         new_gps_data = true;
       }
     }
-    if(DEBUG) Serial.println(out);
+    //if(DEBUG) Serial.println(out);
     if(DEBUG) delay(1000); /* Wait for Serial to clear for debug */
     if(new_gps_data){
       if(DEBUG) Serial.print("[GPS] New data\n");
