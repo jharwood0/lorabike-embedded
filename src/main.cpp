@@ -23,6 +23,8 @@ bool LoRaWAN_connection = false;
 float flat = 0;
 float flon = 0;
 float falt = 0;
+unsigned long chars;
+unsigned short sentences, fchecksum;
 uint8_t satellites = 0;
 unsigned long age = 0;
 bool new_gps_data = false;
@@ -81,7 +83,6 @@ void loop(){
   if(ENABLE_GPS){
     if(DEBUG) Serial.print("[GPS] Reading UART...\n");
     if(DEBUG) delay(1000); /* Wait for Serial to clear for debug */
-    while (!Serial1.available()){}
     String out = "";
     while (Serial1.available()){
       uint8_t c = Serial1.read();
@@ -91,13 +92,15 @@ void loop(){
         new_gps_data = true;
       }
     }
-    //if(DEBUG) Serial.println(out);
+    if(DEBUG) Serial.println("\n------\n"+out+"\n--------\n");
     if(DEBUG) delay(1000); /* Wait for Serial to clear for debug */
-    if(new_gps_data){
-      if(DEBUG) Serial.print("[GPS] New data\n");
+    //if(new_gps_data){
+      //if(DEBUG) Serial.print("[GPS] New data\n");
       gps.f_get_position(&flat, &flon, &age);
       satellites = gps.satellites();
       falt = gps.f_altitude();
+      gps.stats(&chars, &sentences, &fchecksum);
+
       if(DEBUG){
         Serial.print("LAT: ");
         Serial.print(flat);
@@ -109,8 +112,14 @@ void loop(){
         Serial.print(satellites);
         Serial.print("| ALT: ");
         Serial.println(falt);
+        Serial.print("CHARS: ");
+        Serial.print(chars);
+        Serial.print(" SENTENCES: ");
+        Serial.print(sentences);
+        Serial.print(" FAILED: ");
+        Serial.print(fchecksum);
       }
-    }
+    //}
   }
   if(ENABLE_LORAWAN){
     if(!LoRaWAN_connection){
