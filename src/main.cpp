@@ -11,7 +11,7 @@ UART3 -> Serial2 -> LoRaWAN
 String APPEUI = "70B3D57EF00041F8";
 String APPKEY = "6F5A76EE295FB19C6E51095DD606498D";
 
-#define DEBUG 0
+#define DEBUG 1
 #define ENABLE_GPS 1
 #define ENABLE_LORAWAN 1
 
@@ -22,6 +22,8 @@ bool LoRaWAN_connection = false;
 
 float flat = 0;
 float flon = 0;
+float falt = 0;
+uint8_t satellites = 0;
 unsigned long age = 0;
 bool new_gps_data = false;
 
@@ -94,6 +96,8 @@ void loop(){
     if(new_gps_data){
       if(DEBUG) Serial.print("[GPS] New data\n");
       gps.f_get_position(&flat, &flon, &age);
+      satellites = gps.satellites();
+      falt = gps.f_altitude();
       if(DEBUG){
         Serial.print("LAT: ");
         Serial.print(flat);
@@ -101,6 +105,10 @@ void loop(){
         Serial.print(flon);
         Serial.print("| AGE: ");
         Serial.print(age);
+        Serial.print("| SAT: ");
+        Serial.print(satellites);
+        Serial.print("| ALT: ");
+        Serial.println(falt);
       }
     }
   }
@@ -108,7 +116,7 @@ void loop(){
     if(!LoRaWAN_connection){
       initialise_LoRaWAN();
     }else{
-      lora_pkt data = {(flat * 10000000), (flon * 10000000), -1, 0};
+      lora_pkt data = {(flat * 10000000), (flon * 10000000), falt, satellites};
       LoRaWAN.txBytes((byte*)&data, (uint8_t)sizeof(data));
     }
     if(DEBUG) Serial.println(LoRaWAN.deveui());
